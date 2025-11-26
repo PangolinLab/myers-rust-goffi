@@ -1,0 +1,10 @@
+target/
+.idea/
+Cargo.lock
+.so
+.o
+.cdylib
+.dylib
+.dll
+.exe
+.AppImage
