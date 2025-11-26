@@ -9,16 +9,22 @@ package myers_ffi
 import "C"
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"unsafe"
 )
 
 type EditOp int
 
+/*
 const (
 	Equal EditOp = iota
 	Delete
 	Insert
 )
+*/
 
 type EditRecord struct {
 	Op   EditOp
@@ -115,4 +121,40 @@ func GetDiffs(oldLines, newLines []string) []EditRecord {
 		})
 	}
 	return goRec
+}
+
+func ApplyDiffs(oldLines []string, recs []EditRecord) []string {
+	cOld := make([]*C.char, len(oldLines)+1)
+	for i, s := range oldLines {
+		cOld[i] = C.CString(s)
+	}
+	cOld[len(oldLines)] = nil
+	defer func() {
+		for _, p := range cOld {
+			if p != nil {
+				C.free(unsafe.Pointer(p))
+			}
+		}
+	}()
+
+	cRecs := make([]C.EditRecord, len(recs)+1)
+	for i, r := range recs {
+		cRecs[i].op = C.EditOp(r.Op)
+		cRecs[i].line = C.CString(r.Line)
+	}
+	cRecs[len(recs)].line = nil
+	defer func() {
+		for i := range recs {
+			C.free(unsafe.Pointer(cRecs[i].line))
+		}
+	}()
+
+	newC := C.apply_diff((**C.char)(&cOld[0]), &cRecs[0])
+	defer C.free_applied(newC)
+
+	var result []string
+	for p := newC; *p != nil; p = (**C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(p)) + unsafe.Sizeof(*p))) {
+		result = append(result, C.GoString(*p))
+	}
+	return result
 }

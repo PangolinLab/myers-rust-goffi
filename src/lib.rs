@@ -73,6 +73,72 @@ pub extern "C" fn free_diff(records: *mut EditRecord) {
     }
 }
 
+#[no_mangle]
+pub extern "C" fn apply_diff(
+    old_lines: *const *const c_char,
+    records: *const EditRecord,
+) -> *mut *mut c_char {
+    // 1. 读取 old_lines
+    let mut old: Vec<String> = Vec::new();
+    unsafe {
+        let mut p = old_lines;
+        while !(*p).is_null() {
+            old.push(CStr::from_ptr(*p).to_string_lossy().into_owned());
+            p = p.add(1);
+        }
+    }
+
+    // 2. 遍历 EditRecord 构建新文本
+    let mut new_lines: Vec<CString> = Vec::new();
+    let mut old_idx = 0;
+
+    unsafe {
+        let mut r = records;
+        while !(*r).line.is_null() {
+            match (*r).op {
+                EditOp::Equal => {
+                    if old_idx < old.len() {
+                        new_lines.push(CString::new(old[old_idx].clone()).unwrap());
+                        old_idx += 1;
+                    }
+                }
+                EditOp::Insert => {
+                    new_lines.push(CString::new(CStr::from_ptr((*r).line).to_string_lossy().into_owned()).unwrap());
+                }
+                EditOp::Delete => {
+                    old_idx += 1; // 跳过旧行
+                }
+            }
+            r = r.add(1);
+        }
+    }
+
+    // 3. 转为 C 字符串数组
+    let mut c_arr: Vec<*mut c_char> = new_lines.iter_mut().map(|s| s.as_ptr() as *mut c_char).collect();
+    c_arr.push(std::ptr::null_mut());
+
+    let ptr = c_arr.as_mut_ptr();
+    std::mem::forget(new_lines);
+    std::mem::forget(c_arr);
+    ptr
+}
+
+/// free apply_diff 返回的数组
+#[no_mangle]
+pub extern "C" fn free_applied(lines: *mut *mut c_char) {
+    if lines.is_null() {
+        return;
+    }
+    unsafe {
+        let mut p = lines;
+        while !(*p).is_null() {
+            let _ = CString::from_raw(*p);
+            p = p.add(1);
+        }
+        let _ = Vec::from_raw_parts(lines, 0, 0);
+    }
+}
+
 fn myers_diff(old: &[String], new: &[String]) -> Vec<(String, String)> {
     let n = old.len();
     let m = new.len();
